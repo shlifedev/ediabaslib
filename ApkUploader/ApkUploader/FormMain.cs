@@ -18,13 +18,14 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Services;
 using Google.Apis.Upload;
 using Google.Apis.Util.Store;
+using static Google.Apis.AndroidPublisher.v3.AndroidPublisherService;
 
 namespace ApkUploader
 {
     public partial class FormMain : Form
     {
         private const string StatusCompleted = "completed";
-        private const string PackageName = @"de.holeschak.bmw_deep_obd";
+        private const string PackageName = @"kr.infovine.signintest";
         private const string ExpansionKeep = @"*";
         private static readonly string[] TracksEdit = { "alpha", "beta", "production", "internal" };
         private volatile Thread _serviceThread;
@@ -40,7 +41,7 @@ namespace ApkUploader
                 FileSize = fileSize;
             }
 
-            public int ApkVersion { get;}
+            public int ApkVersion { get; }
             public int ExpansionVersion { get; }
             public long FileSize { get; }
         }
@@ -272,17 +273,30 @@ namespace ApkUploader
 
             return true;
         }
-
+        static string[] Scopes = { Scope.Androidpublisher };
         private async Task<UserCredential> GetCredatials()
         {
+            //UserCredential credential;
+            //using (var stream = new FileStream(Path.Combine(_apkPath, "client_secrets.json"), FileMode.Open, FileAccess.Read))
+            //{
+            //    credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+            //        GoogleClientSecrets.Load(stream).Secrets,
+            //        new[] { AndroidPublisherService.Scope.Androidpublisher },
+            //        "ApkUploader", _cts.Token, new FileDataStore("ApkUploader"));
+            //}
+
             UserCredential credential;
-            using (var stream = new FileStream(Path.Combine(_apkPath, "client_secrets.json"), FileMode.Open, FileAccess.Read))
+            using (var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
             {
-                credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                string credPath = "token.json";
+                credential = GoogleWebAuthorizationBroker.AuthorizeAsync(
                     GoogleClientSecrets.Load(stream).Secrets,
-                    new[] { AndroidPublisherService.Scope.Androidpublisher },
-                    "ApkUploader", _cts.Token, new FileDataStore("ApkUploader"));
+                    Scopes,
+                    "user",
+                    CancellationToken.None,
+                    new FileDataStore(credPath, true)).Result;
             }
+
 
             return credential;
         }
@@ -292,7 +306,7 @@ namespace ApkUploader
             return new BaseClientService.Initializer
             {
                 HttpClientInitializer = credential,
-                ApplicationName = PackageName
+                ApplicationName = "signtest"
             };
         }
 
@@ -530,41 +544,41 @@ namespace ApkUploader
             UpdateStatus(string.Empty);
             _cts = new CancellationTokenSource();
             _serviceThread = new Thread(async () =>
+            {
+                UpdateStatus(string.Empty);
+                StringBuilder sb = new StringBuilder();
+                try
                 {
-                    UpdateStatus(string.Empty);
-                    StringBuilder sb = new StringBuilder();
-                    try
+                    UserCredential credential = await GetCredatials();
+                    using (AndroidPublisherService service = new AndroidPublisherService(GetInitializer(credential)))
                     {
-                        UserCredential credential = await GetCredatials();
-                        using (AndroidPublisherService service = new AndroidPublisherService(GetInitializer(credential)))
-                        {
-                            EditsResource edits = service.Edits;
-                            EditsResource.InsertRequest editRequest = edits.Insert(null, PackageName);
-                            AppEdit appEdit = await editRequest.ExecuteAsync(_cts.Token);
-                            ApksListResponse apksResponse = await edits.Apks.List(PackageName, appEdit.Id).ExecuteAsync(_cts.Token);
+                        EditsResource edits = service.Edits;
+                        EditsResource.InsertRequest editRequest = edits.Insert(null, PackageName);
+                        AppEdit appEdit = await editRequest.ExecuteAsync(_cts.Token);
+                        ApksListResponse apksResponse = await edits.Apks.List(PackageName, appEdit.Id).ExecuteAsync(_cts.Token);
 
-                            sb.AppendLine("Apks:");
-                            foreach (Apk apk in apksResponse.Apks)
+                        sb.AppendLine("Apks:");
+                        foreach (Apk apk in apksResponse.Apks)
+                        {
+                            if (apk.VersionCode != null)
                             {
-                                if (apk.VersionCode != null)
-                                {
-                                    sb.AppendLine($"Version: {apk.VersionCode.Value}, SHA1: {apk.Binary.Sha1}");
-                                    await PrintExpansion(sb, edits, appEdit, apk.VersionCode.Value);
-                                }
+                                sb.AppendLine($"Version: {apk.VersionCode.Value}, SHA1: {apk.Binary.Sha1}");
+                                await PrintExpansion(sb, edits, appEdit, apk.VersionCode.Value);
                             }
                         }
                     }
-                    catch (Exception e)
-                    {
-                        sb.AppendLine($"Exception: {e.Message}");
-                    }
-                    finally
-                    {
-                        _serviceThread = null;
-                        _cts.Dispose();
-                        UpdateStatus(sb.ToString());
-                    }
-                });
+                }
+                catch (Exception e)
+                {
+                    sb.AppendLine($"Exception: {e.Message}");
+                }
+                finally
+                {
+                    _serviceThread = null;
+                    _cts.Dispose();
+                    UpdateStatus(sb.ToString());
+                }
+            });
             _serviceThread.Start();
 
             return true;
@@ -1205,7 +1219,6 @@ namespace ApkUploader
                                 sb.AppendLine("No existing expansion found!");
                             }
                         }
-
                         List<LocalizedText> releaseNotes = new List<LocalizedText>();
                         if (apkChanges != null)
                         {
@@ -1523,6 +1536,11 @@ namespace ApkUploader
         private void buttonAbort_Click(object sender, EventArgs e)
         {
             _cts.Cancel();
+        }
+
+        private void textBoxStatus_TextChanged(object sender, EventArgs e)
+        {
+
         }
     }
 }
