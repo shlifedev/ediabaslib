@@ -1,5 +1,0 @@
-*.o
-*.s
-/mapfile.txt
-*.axf
-*.bin

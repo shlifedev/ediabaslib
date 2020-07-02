@@ -1,6 +1,0 @@
-*.obj
-/build
-/dist
-/debug
-*.fil
-*.lst
